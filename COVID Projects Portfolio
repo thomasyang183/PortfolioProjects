@@ -1,0 +1,178 @@
+SELECT *
+FROM CovidDeaths 
+-- WHERE continent is NULL
+ORDER BY 3,4
+
+
+SELECT *
+FROM CovidVax 
+WHERE continent is NOT NULL
+ORDER BY 3,4
+
+
+SELECT location, date, total_cases, new_cases, total_deaths, population
+FROM CovidDeaths
+WHERE continent is NOT NULL
+ORDER BY 1,2; 
+
+
+-- Looking at the # of total deaths VS total cases
+-- Focus on likelihood of dying from COVID in your region
+SELECT location, date, total_cases, total_deaths, (CAST (total_deaths AS FLOAT) / CAST (total_cases AS FLOAT)) * 100 AS death_rate
+FROM CovidDeaths
+WHERE location LIKE '%States' AND continent is NOT NULL
+ORDER BY 1,2; 
+
+-- Looking at the # of total cases VS populations
+-- Looking at the ratio of population contracting COVID
+SELECT location, date, total_cases, population, (CAST (total_cases AS FLOAT) / CAST (population AS FLOAT)) * 100 AS infection_rate
+FROM CovidDeaths
+WHERE location LIKE '%States' AND continent is NOT NULL
+ORDER BY 1,2; 
+
+-- Looking at country with the highest infection rate compared to population
+SELECT location, population, total_cases, (CAST (total_cases AS float) / CAST(population as float)) * 100 AS infection_rate
+FROM CovidDeaths
+WHERE date = '2022-04-23' AND continent is NOT NULL
+ORDER BY infection_rate DESC
+
+-- Looking at country with the highest infection rate compared to population
+-- Same as above
+SELECT location, population, MAX(total_cases) AS HighestInfection, MAX(CAST (total_cases AS float) / population) * 100 AS infection_rate
+FROM CovidDeaths
+GROUP BY location,population
+ORDER BY infection_rate DESC 
+
+-- Looking at country with the highest # of deaths
+SELECT location, MAX(total_deaths) AS TotalDeathCounts
+FROM CovidDeaths
+WHERE continent is NOT NULL
+GROUP BY location 
+ORDER BY TotalDeathCounts DESC
+
+-- Let's break things down by continents
+SELECT continent, MAX(CAST(total_deaths AS int)) AS TotalContinentalDeaths
+FROM CovidDeaths
+WHERE continent is NOT NULL
+GROUP BY continent
+ORDER BY TotalContinentalDeaths DESC
+
+
+-- Showing continent with the highest death counts per population
+SELECT continent, MAX(CAST(total_deaths as FLOAT) / population) * 100 AS deathCountsPerPopulation
+FROM CovidDeaths
+WHERE continent is NOT NULL
+GROUP by continent
+ORDER BY deathCountsPerPopulation DESC
+
+
+
+-- Set up with View used for Tableau
+-- Showing continents with highest death count per continents
+SELECT continent, MAX(CAST(total_deaths as FLOAT)) AS TotalDeathPerContinent
+FROM CovidDeaths
+WHERE continent is NOT NULL
+GROUP by continent
+ORDER BY TotalDeathPerContinent DESC
+
+
+-- Global Numbers per day
+SELECT date, SUM(new_cases) AS total_New_Cases, SUM(new_deaths) AS total_New_Death, CAST(SUM(new_deaths) AS float) / SUM(new_cases) * 100 AS death_percentage
+FROM CovidDeaths
+WHERE continent is NOT NULL
+GROUP BY date
+ORDER BY 1
+
+
+-- Global Numbers overall 
+SELECT SUM(new_cases) AS total_Cases, SUM(new_deaths) AS total_Death, CAST(SUM(new_deaths) AS float) / SUM(new_cases) * 100 AS death_percentage
+FROM CovidDeaths
+WHERE continent is NOT NULL
+-- GROUP BY date
+ORDER BY 1
+
+
+
+-- Join CovidVaccination Table
+-- Look at total population and vaccinations using total_vaccinations
+
+SELECT dea.continent, dea.location, dea.population, dea.date, vax.new_vaccinations
+FROM CovidDeaths dea
+JOIN CovidVax vax
+ON dea.location = vax.location AND dea.date = vax.date
+WHERE dea.continent is NOT NULL 
+Order by 2,3
+
+
+-- Join CovidVaccination Table
+-- Look at total population and rolling counts of vaccinations 
+SELECT dea.continent, dea.location, dea.population, dea.date, vax.new_vaccinations
+, SUM(CAST(vax.new_vaccinations AS bigint)) OVER (Partition BY dea.location ORDER BY dea.location, dea.date) AS rolling_count
+-- , SUM(CONVERT(bigint, vax.new_vaccinations)) OVER (Partition BY dea.location ORDER BY dea.location, dea.date) AS rolling_count
+FROM CovidDeaths dea 
+JOIN CovidVax vax
+ON dea.location = vax.location AND dea.date = vax.date
+WHERE dea.continent is NOT NULL 
+Order by 2,3
+
+
+-- Use Common Table Expression
+-- Compare population against rolling count of vaccinations
+
+WITH Popvsvac (Continent, Location, Population, Date, New_vaccinations, RollingPeopleVaccinated)
+AS
+(
+SELECT dea.continent, dea.location, dea.population, dea.date, vax.new_vaccinations,
+SUM(CAST(vax.new_vaccinations AS bigint)) OVER (Partition BY dea.location ORDER BY dea.location, dea.date) AS RollingPeopleVaccinated
+-- , SUM(CONVERT(bigint, vax.new_vaccinations)) OVER (Partition BY dea.location ORDER BY dea.location, dea.date) AS rolling_count
+FROM CovidDeaths dea  
+JOIN CovidVax vax
+ON dea.location = vax.location AND dea.date = vax.date
+WHERE dea.continent is NOT NULL 
+-- Order by 2,3
+)
+SELECT *, (CAST(RollingPeopleVaccinated AS FLOAT) / Population) * 100 AS VaccinationPercentage
+FROM Popvsvac
+ORDER BY Location, Date
+
+
+-- Temp table
+
+-- DROP TABLE IF EXISTS #PercentagePopulationVaccinated
+Create TABLE #PercentagePopulationVaccinated
+(
+    Continent NVARCHAR(255),
+    Location NVARCHAR(255),
+    Date DATETIME,
+    Population NUMERIC,
+    New_vaccinations NUMERIC,
+    RollingPeopleVaccinated NUMERIC
+)
+Insert Into #PercentagePopulationVaccinated 
+SELECT dea.continent, dea.location, dea.population, dea.date, vax.new_vaccinations,
+SUM(CAST(vax.new_vaccinations AS bigint)) OVER (Partition BY dea.location ORDER BY dea.location, dea.date) AS RollingPeopleVaccinated
+-- , SUM(CONVERT(bigint, vax.new_vaccinations)) OVER (Partition BY dea.location ORDER BY dea.location, dea.date) AS rolling_count
+FROM CovidDeaths dea  
+JOIN CovidVax vax
+ON dea.location = vax.location AND dea.date = vax.date
+WHERE dea.continent is NOT NULL 
+-- Order by 2,3
+
+SELECT *, (CAST(RollingPeopleVaccinated AS FLOAT) / Population) * 100 AS VaccinationPercentage
+FROM #PercentagePopulationVaccinated
+ORDER BY Location, Date
+
+
+
+-- Create a view to store data for visualization
+-- Now permenant view
+-- Connect Tableau Public to SQL
+CREATE VIEW PercentagePopulationVaccinated AS
+SELECT dea.continent, dea.location, dea.population, dea.date, vax.new_vaccinations,
+SUM(CAST(vax.new_vaccinations AS bigint)) OVER (Partition BY dea.location ORDER BY dea.location, dea.date) AS RollingPeopleVaccinated
+-- , SUM(CONVERT(bigint, vax.new_vaccinations)) OVER (Partition BY dea.location ORDER BY dea.location, dea.date) AS rolling_count
+FROM CovidDeaths dea  
+JOIN CovidVax vax
+ON dea.location = vax.location AND dea.date = vax.date
+WHERE dea.continent is NOT NULL 
+-- Order by 2,3
